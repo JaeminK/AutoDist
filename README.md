@@ -1,7 +1,5 @@
 # AutoDist
 
-<div align="center">
-
 ![Python](https://img.shields.io/badge/Python-3.10+-blue.svg)
 ![PyTorch](https://img.shields.io/badge/PyTorch-2.7+-red.svg)
 ![CUDA](https://img.shields.io/badge/CUDA-Supported-green.svg)
