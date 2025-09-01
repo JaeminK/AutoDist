@@ -1,0 +1,55 @@
+# Python cache files
+__pycache__/
+*.py[cod]
+
+# Virtual environments
+venv/
+env/
+.env
+
+# IDE-specific files
+.vscode/
+.idea/
+
+# Compiled Python files
+*.pyc
+
+# Logs
+*.log
+
+# Temporary files
+*.tmp
+
+# Distribution / packaging
+dist/
+build/
+*.egg-info/
+
+# Jupyter Notebook
+.ipynb_checkpoints
+
+# Model checkpoints and cache
+*.pt
+*.pth
+*.bin
+.cache/
+
+# Results and output directories
+results/
+output/
+
+# System files
+.DS_Store
+Thumbs.db
+
+# Dependency management
+pip-lock.txt
+poetry.lock
+
+# Ignore sensitive information
+*.key
+*.pem
+*.env
+
+# Profile
+*.nsys-rep
