@@ -145,7 +145,7 @@ cd benchmarks
 - `local_rank`는 TP와 PP 크기의 곱보다 작아야 합니다.
 - `batch_size`는 단일 토큰 추론을 위해 반드시 `1`이어야 합니다.
 
-## 🔧 Advanced Usage
+## Advanced Usage
 
 ### 커스텀 모델 사용
 
