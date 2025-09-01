@@ -6,11 +6,11 @@
 
 **자동으로 단일 GPU HuggingFace 모델을 분산 추론을 위한 텐서 병렬화 및 파이프라인 병렬화로 변환하는 도구**
 
-## 📖 Description
+## Description
 
 AutoDist는 단일 GPU HuggingFace 모델을 효율적인 추론을 위해 텐서 병렬화(Tensor Parallel) 및 파이프라인 병렬화(Pipeline Parallel)를 사용한 분산 설정으로 자동 변환하는 도구입니다.
 
-### 🚀 주요 기능
+### 주요 기능
 
 - **텐서 병렬화 (TP)**: 모델의 가중치를 여러 GPU에 분산하여 메모리 사용량을 줄이고 처리 속도를 향상
 - **파이프라인 병렬화 (PP)**: 모델의 레이어를 여러 GPU에 분산하여 대용량 모델 처리 가능
@@ -18,7 +18,7 @@ AutoDist는 단일 GPU HuggingFace 모델을 효율적인 추론을 위해 텐�
 - **간단한 CLI**: 단일 GPU, TP, PP 추론을 위한 직관적인 명령줄 인터페이스
 - **자동 캐싱**: TP/PP 샤드 및 스테이지 자동 생성 및 캐싱
 
-### 🏗️ 아키텍처
+### 아키텍처
 
 ```
 ┌─────────────────┐    ┌─────────────────┐    ┌─────────────────┐
@@ -30,7 +30,7 @@ AutoDist는 단일 GPU HuggingFace 모델을 효율적인 추론을 위해 텐�
 └─────────────────┘    └─────────────────┘    └─────────────────┘
 ```
 
-## 📋 Requirements
+## Requirements
 
 - **Python**: 3.10 이상
 - **PyTorch**: 2.7 이상
@@ -43,7 +43,7 @@ AutoDist는 단일 GPU HuggingFace 모델을 효율적인 추론을 위해 텐�
 - **텐서 병렬화**: 2개 이상의 GPU (동일한 VRAM 권장)
 - **파이프라인 병렬화**: 2개 이상의 GPU (다른 VRAM 크기 지원)
 
-## 🛠️ Installation
+## Installation
 
 ### 1. 저장소 클론
 
@@ -64,7 +64,7 @@ pip install -r requirements.txt
 pip install -e .
 ```
 
-## 🚀 Quick Start
+## Quick Start
 
 ### 단일 GPU 추론
 
@@ -118,7 +118,7 @@ torchrun --nproc_per_node 4 main.py \
   --max-output-length 512
 ```
 
-## 📊 Benchmarks
+## Benchmarks
 
 벤치마크 스크립트를 사용하여 성능을 테스트할 수 있습니다:
 
@@ -131,6 +131,7 @@ cd benchmarks
 ./test_tp_dist.sh
 
 # 파이프라인 병렬화 벤치마크 (2 GPU)
+# 단, Micro-batch 가 적용되지 않았기 때문에 Throughput 개선은 볼 수 없음.
 ./test_pp_dist.sh
 
 # 텐서 + 파이프라인 병렬화 벤치마크 (4 GPU)
@@ -185,17 +186,11 @@ model_runner = ModelRunner(
 3. **로그 확인**: 환경 변수 `CUDA_LAUNCH_BLOCKING=1` 설정
 
 
-## 🙏 Acknowledgments
+## Acknowledgments
 
 - [HuggingFace Transformers](https://github.com/huggingface/transformers) - 모델 로딩 및 추론
 - [PyTorch](https://pytorch.org/) - 딥러닝 프레임워크
 - [Megatron-LM](https://github.com/NVIDIA/Megatron-LM) - 분산 추론 아이디어
-
-## 📞 Contact
-
-- **이슈 리포트**: [GitHub Issues](https://github.com/JaeminK/AutoDist/issues)
-- **이메일**: [your-email@example.com]
-- **프로젝트 링크**: [https://github.com/JaeminK/AutoDist](https://github.com/JaeminK/AutoDist)
 
 ---
 
