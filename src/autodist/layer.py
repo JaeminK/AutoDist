@@ -116,10 +116,11 @@ class PipelineParallelLMHead(torch.nn.Module):
 
 class PipelineParallelTransformerLayer(torch.nn.Module):
     def __init__(self, layer: torch.nn.Module, comm_utils: CommUtils, stage_num: int, 
-                 is_first_layer_in_stage: bool = False, is_last_layer_in_stage: bool = False, layer_idx: int = 0):
+                 is_first_layer_in_stage: bool = False, is_last_layer_in_stage: bool = False, layer_idx: int = 0, tp_comm_utils: CommUtils = None):
         super().__init__()
         self.layer = layer
         self.comm_utils = comm_utils
+        self.tp_comm_utils = tp_comm_utils
         self.stage_num = stage_num
         self.is_first_layer_in_stage = is_first_layer_in_stage
         self.is_last_layer_in_stage = is_last_layer_in_stage
@@ -146,19 +147,40 @@ class PipelineParallelTransformerLayer(torch.nn.Module):
 
     def forward(self, *args, **kwargs):
         if self.is_first_layer_in_stage and self.stage_num > 0:
-            if 'hidden_states' in kwargs:
-                kwargs['hidden_states'] = self.comm_utils.recv(kwargs['hidden_states'], self.stage_num - 1)
-            else:
-                recv_args = self.comm_utils.recv(args[0], self.stage_num - 1)
-                args = (recv_args,) + args[1:]
+            if self.comm_utils is not None:
+                recv_rank = (self.stage_num - 1) * self.tp_comm_utils.world_size
+                if 'hidden_states' in kwargs:
+                    received_data = self.comm_utils.recv(kwargs['hidden_states'], recv_rank)
+                else:
+                    received_data = self.comm_utils.recv(args[0], recv_rank)
+            
+            if self.tp_comm_utils is not None:
+                broadcast_rank = self.stage_num * self.tp_comm_utils.world_size
+                if 'hidden_states' in kwargs:
+                    if self.tp_comm_utils.rank == 0:
+                        kwargs['hidden_states'] = received_data
+                    self.tp_comm_utils.broadcast(kwargs['hidden_states'], source_rank=broadcast_rank)
+                else:
+                    if self.tp_comm_utils.rank != 0:
+                        received_data = torch.empty_like(args[0])
+                    self.tp_comm_utils.broadcast(received_data, source_rank=broadcast_rank)
+            
+            if 'hidden_states' not in kwargs:
+                args = (received_data,) + args[1:]
 
         output = self.layer(*args, **kwargs)
         
-        if self.is_last_layer_in_stage and self.stage_num < self.comm_utils.world_size - 1:
-            if not isinstance(output, tuple):
-                self.comm_utils.send(output, self.stage_num + 1)
+        if self.is_last_layer_in_stage and self.comm_utils is not None:
+            if self.tp_comm_utils is not None:
+                num_total_stages = self.comm_utils.world_size // self.tp_comm_utils.world_size
             else:
-                self.comm_utils.send(output[0], self.stage_num + 1)
+                num_total_stages = self.comm_utils.world_size
+            
+            if self.stage_num < num_total_stages - 1:
+                send_rank = (self.stage_num + 1) * self.tp_comm_utils.world_size
+                if self.comm_utils is not None:
+                    data_to_send = output[0] if isinstance(output, tuple) else output
+                    self.comm_utils.send(data_to_send, send_rank)
         
         return output
 
@@ -168,7 +190,7 @@ class TensorPipelineParallelEmbedding(torch.nn.Embedding):
                  stage_num: int, is_first_stage: bool = False):
         num_embeddings, embedding_dim = weight.shape
         super().__init__(num_embeddings, embedding_dim, padding_idx=padding_idx, dtype=weight.dtype)
-        self.tp_comm_utils = tp_comm_utils
+        self.comm_utils = tp_comm_utils
         self.stage_num = stage_num
         self.is_first_stage = is_first_stage
         self.is_tp_pp_module = True
@@ -180,7 +202,7 @@ class TensorPipelineParallelEmbedding(torch.nn.Embedding):
                              dtype=self.weight.dtype, device=input_ids.device)
         
         output = super().forward(input_ids)
-        output = self.tp_comm_utils.all_gather(output)
+        output = self.comm_utils.all_gather(output)
         return output
 
 
@@ -189,7 +211,7 @@ class TensorPipelineParallelLMHead(torch.nn.Linear):
                  stage_num: int, is_last_stage: bool = False):
         out_features, in_features = weight.shape
         super().__init__(in_features, out_features, bias=True if bias is not None else False, dtype=weight.dtype)
-        self.tp_comm_utils = tp_comm_utils
+        self.comm_utils = tp_comm_utils
         self.stage_num = stage_num
         self.is_last_stage = is_last_stage
         self.is_tp_pp_module = True
@@ -204,5 +226,5 @@ class TensorPipelineParallelLMHead(torch.nn.Linear):
         output = torch.nn.functional.linear(hidden_states, self.weight)
         if self.bias is not None:
             output += self.bias
-        output = self.tp_comm_utils.all_gather(output)
+        output = self.comm_utils.all_gather(output)
         return output

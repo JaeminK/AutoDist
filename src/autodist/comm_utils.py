@@ -1,8 +1,9 @@
 import torch
 import torch.distributed as dist
+from typing import Optional
 
 class CommUtils:
-    def __init__(self, group: dist.ProcessGroup):
+    def __init__(self, group: Optional[dist.ProcessGroup] = None):
         self.group = group
         self.rank = dist.get_rank(group=self.group)
         self.world_size = dist.get_world_size(group=self.group)

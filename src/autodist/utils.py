@@ -96,6 +96,8 @@ def get_split_weights(model: torch.nn.Module, world_size: int):
                         split_weights[name]['weight'] = torch.tensor_split(module.weight, world_size, dim=1)
                 elif _is_lm_head(name):
                     split_weights[name]['weight'] = torch.tensor_split(module.weight, world_size, dim=0)
+                    if hasattr(module, "bias") and module.bias is not None:
+                        split_weights[name]['bias'] = torch.tensor_split(module.bias, world_size, dim=0)
                 else:
                     if _is_mlp_up_projection(name):
                         split_weights[name]['weight'] = torch.tensor_split(module.weight, world_size, dim=0)
@@ -130,7 +132,10 @@ def convert_to_tensor_parallel(model: torch.nn.Module, weights: dict, rank: int 
                         modules_to_replace[name] = RowParallelLinear(split_weight_tensor, module.bias, None)
                 elif _is_lm_head(name):
                     split_weight_tensor = weights[name]['weight'][rank]
-                    modules_to_replace[name] = ColumnParallelLinear(split_weight_tensor, module.bias, None, gather_output=True)
+                    split_bias_tensor = None
+                    if hasattr(module, "bias") and module.bias is not None:
+                        split_bias_tensor = weights[name]['bias'][rank]
+                    modules_to_replace[name] = ColumnParallelLinear(split_weight_tensor, split_bias_tensor, None, gather_output=True)
                 else:
                     if _is_mlp_up_projection(name):
                         split_weight_tensor = weights[name]['weight'][rank]
@@ -345,7 +350,8 @@ def convert_to_pipeline_parallel(model: torch.nn.Module, stage_info: dict, stage
             is_first_layer_in_stage = (i == stage_info['layers_start'])
             is_last_layer_in_stage = (i == stage_info['layers_end'] - 1)
             wrapped_layer = PipelineParallelTransformerLayer(
-                layer, None, stage_num, is_first_layer_in_stage, is_last_layer_in_stage, i-stage_info['layers_start']
+                layer, None, stage_num, is_first_layer_in_stage, is_last_layer_in_stage, i-stage_info['layers_start'],
+                tp_comm_utils=None
             )
             stage_layers.append(wrapped_layer)
         modules_to_replace[transformer_layers_name] = stage_layers
@@ -543,9 +549,10 @@ def load_tp_pp_shard_from_cache(cache_path: str, device, execute_rank: int, tens
     tp_start_rank = stage_num * tensor_parallel_size
     tp_comm_utils = _initialize_distributed_shard(tp_start_rank, tensor_parallel_size)
     
-    pp_ranks = [rank_in_stage + i * tensor_parallel_size for i in range(pipeline_parallel_size)]
-    pp_group = dist.new_group(ranks=pp_ranks)
-    pp_comm_utils = CommUtils(pp_group)
+    if rank_in_stage == 0:
+        pp_comm_utils = CommUtils()
+    else:
+        pp_comm_utils = None
     
     from .wrapper import TensorPipelineParallelWrapper
     
@@ -586,17 +593,10 @@ def create_and_save_tp_pp_shards(model, model_name_or_path: str, cache_dir: str,
             split_weights = get_split_weights(stage_model, tensor_parallel_size)
             stage_model, _ = convert_tp_model_config(stage_model, tensor_parallel_size)
             
-            # Initialize TP communication utils for this stage
-            tp_start_rank = stage_num * tensor_parallel_size
-            tp_comm_utils = _initialize_distributed_shard(tp_start_rank, tensor_parallel_size)
-            
-            is_first_stage = (stage_num == 0)
-            is_last_stage = (stage_num == pipeline_parallel_size - 1)
-            
             for rank_in_stage in range(tensor_parallel_size):
                 tp_stage_model = convert_to_tp_pp_parallel(
                     stage_model, split_weights, rank_in_stage, stage_num, 
-                    is_first_stage, is_last_stage, tp_comm_utils
+                    stage_info['is_first_stage'], stage_info['is_last_stage']
                 )
                 
                 cache_path = get_tp_pp_cache_path(model_name_or_path, cache_dir, tensor_parallel_size, pipeline_parallel_size, stage_num, rank_in_stage)
@@ -676,7 +676,7 @@ def load_or_create_tp_pp_model(model_name_or_path: str, cache_dir: str, tensor_p
 
 
 def convert_to_tp_pp_parallel(model: torch.nn.Module, weights: dict, rank: int = 0, stage_num: int = 0, 
-                             is_first_stage: bool = False, is_last_stage: bool = False, tp_comm_utils=None):
+                             is_first_stage: bool = False, is_last_stage: bool = False):
     from .layer import TensorPipelineParallelEmbedding, TensorPipelineParallelLMHead
     
     modules_to_replace = {}
@@ -686,7 +686,7 @@ def convert_to_tp_pp_parallel(model: torch.nn.Module, weights: dict, rank: int =
                 if not _is_position_embedding(name):
                     split_weight_tensor = weights[name]['weight'][rank]
                     modules_to_replace[name] = TensorPipelineParallelEmbedding(
-                        split_weight_tensor, module.padding_idx, tp_comm_utils, stage_num, is_first_stage
+                        split_weight_tensor, module.padding_idx, None, stage_num, is_first_stage
                     )
             elif _is_linear(module):
                 if _is_self_attention(name):
@@ -695,14 +695,17 @@ def convert_to_tp_pp_parallel(model: torch.nn.Module, weights: dict, rank: int =
                         split_bias_tensor = None
                         if hasattr(module, "bias") and module.bias is not None:
                             split_bias_tensor = weights[name]['bias'][rank]
-                        modules_to_replace[name] = ColumnParallelLinear(split_weight_tensor, split_bias_tensor, tp_comm_utils)
+                        modules_to_replace[name] = ColumnParallelLinear(split_weight_tensor, split_bias_tensor, None)
                     else: # This is output projection layer
                         split_weight_tensor = weights[name]['weight'][rank]
-                        modules_to_replace[name] = RowParallelLinear(split_weight_tensor, module.bias, tp_comm_utils)
+                        modules_to_replace[name] = RowParallelLinear(split_weight_tensor, module.bias, None)
                 elif _is_lm_head(name):
                     split_weight_tensor = weights[name]['weight'][rank]
+                    split_bias_tensor = None
+                    if hasattr(module, "bias") and module.bias is not None:
+                        split_bias_tensor = weights[name]['bias'][rank]
                     modules_to_replace[name] = TensorPipelineParallelLMHead(
-                        split_weight_tensor, module.bias, tp_comm_utils, stage_num, is_last_stage
+                        split_weight_tensor, split_bias_tensor, None, stage_num, is_last_stage
                     )
                 else:
                     if _is_mlp_up_projection(name):
@@ -710,10 +713,10 @@ def convert_to_tp_pp_parallel(model: torch.nn.Module, weights: dict, rank: int =
                         split_bias_tensor = None
                         if hasattr(module, "bias") and module.bias is not None:
                             split_bias_tensor = weights[name]['bias'][rank]
-                        modules_to_replace[name] = ColumnParallelLinear(split_weight_tensor, split_bias_tensor, tp_comm_utils)
+                        modules_to_replace[name] = ColumnParallelLinear(split_weight_tensor, split_bias_tensor, None)
                     else: # This is down projection layer
                         split_weight_tensor = weights[name]['weight'][rank]
-                        modules_to_replace[name] = RowParallelLinear(split_weight_tensor, module.bias, tp_comm_utils)
+                        modules_to_replace[name] = RowParallelLinear(split_weight_tensor, module.bias, None)
     
     for name, new_module in modules_to_replace.items():
         module_path = name.split('.')

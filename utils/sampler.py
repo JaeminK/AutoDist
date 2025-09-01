@@ -45,11 +45,10 @@ class DistributedSampler:
             self.sampler = None
     
     def _determine_sampling_rank(self):
-        if self.tensor_parallel_size > 1:
+        if self.pipeline_parallel_size > 1:
+            return self.local_rank == (self.pipeline_parallel_size - 1) * self.tensor_parallel_size
+        elif self.tensor_parallel_size > 1:
             return self.local_rank == 0
-        elif self.pipeline_parallel_size > 1:
-            stage_num = self.local_rank
-            return stage_num == self.pipeline_parallel_size - 1
         else:
             return True
     
@@ -59,22 +58,20 @@ class DistributedSampler:
         else:
             tokens = torch.empty((1, 1), dtype=torch.long, device=torch.cuda.current_device())
             
-        if self.tensor_parallel_size > 1:
+        if self.pipeline_parallel_size > 1:
+            dist.broadcast(tokens, src=(self.pipeline_parallel_size - 1) * self.tensor_parallel_size)
+        elif self.tensor_parallel_size > 1:
             dist.broadcast(tokens, src=0)
-        elif self.pipeline_parallel_size > 1:
-            last_stage_rank = (self.pipeline_parallel_size - 1) * self.pipeline_parallel_size - 1
-            dist.broadcast(tokens, src=last_stage_rank)
         return tokens
     
     def broadcast_stop_flag(self, stop_flag, device):
         if self.tensor_parallel_size > 1 or self.pipeline_parallel_size > 1:
             stop_flag_tensor = torch.tensor([stop_flag], dtype=torch.bool, device=device)
             
-            if self.tensor_parallel_size > 1:
+            if self.pipeline_parallel_size > 1:
+                dist.broadcast(stop_flag_tensor, src=(self.pipeline_parallel_size - 1) * self.tensor_parallel_size)
+            elif self.tensor_parallel_size > 1:
                 dist.broadcast(stop_flag_tensor, src=0)
-            else:
-                last_stage_rank = (self.pipeline_parallel_size - 1) * self.pipeline_parallel_size - 1
-                dist.broadcast(stop_flag_tensor, src=last_stage_rank)
             
             return stop_flag_tensor.item()
         

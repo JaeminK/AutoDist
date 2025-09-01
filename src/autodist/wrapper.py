@@ -235,11 +235,13 @@ class TensorPipelineParallelWrapper(torch.nn.Module):
         for name, module in self.model.named_modules():
             if hasattr(module, "comm_utils"):
                 if hasattr(module, "is_tp_pp_module") and module.is_tp_pp_module:
-                    setattr(module, "comm_utils", self.comm_utils)
+                    setattr(module, "comm_utils", self.tp_comm_utils)
                 elif hasattr(module, "is_tp_module") and module.is_tp_module:
                     setattr(module, "comm_utils", self.tp_comm_utils)
                 elif hasattr(module, "is_pp_module") and module.is_pp_module:
                     setattr(module, "comm_utils", self.pp_comm_utils)
+                    if hasattr(module, "tp_comm_utils"):
+                        setattr(module, "tp_comm_utils", self.tp_comm_utils)
                 else:
                     setattr(module, "comm_utils", self.tp_comm_utils)
         
