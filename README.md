@@ -19,7 +19,7 @@ AutoDist automatically converts a single-GPU HuggingFace model into a distribute
 
 1. Clone the repository:
    ```bash
-   git clone https://github.com/yourusername/AutoDist.git
+   git clone https://github.com/JaeminK/AutoDist.git
    cd AutoDist
    ```
 
